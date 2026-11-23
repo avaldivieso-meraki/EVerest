@@ -29,8 +29,21 @@ void Feedback::ac_charge_loop_req(const feedback::AcChargeLoopReq& req_values) c
     call_if_available(callbacks.ac_charge_loop_req, req_values);
 }
 
+<<<<<<< HEAD
 void Feedback::v2g_message(const message_20::Type& v2g_message) const {
     call_if_available(callbacks.v2g_message, v2g_message);
+=======
+void Feedback::v2g_message(const V2gMessageType& v2g_message, const io::StreamInputView& exi_frame) const {
+    call_if_available(callbacks.v2g_message, v2g_message, exi_frame);
+}
+
+void Feedback::request_out_of_sequence() const {
+    call_if_available(callbacks.request_out_of_sequence);
+}
+
+void Feedback::ev_app_protocols(const message_20::SupportedAppProtocolRequest& req) const {
+    call_if_available(callbacks.ev_app_protocols, req);
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
 }
 
 void Feedback::evcc_id(const std::string& evccid) const {

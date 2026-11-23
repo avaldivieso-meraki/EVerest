@@ -72,7 +72,19 @@ struct Callbacks {
     std::function<void(const DcChargeLoopReq&)> dc_charge_loop_req;
     std::function<void(const DcMaximumLimits&)> dc_max_limits;
     std::function<void(const AcChargeLoopReq&)> ac_charge_loop_req;
+<<<<<<< HEAD
     std::function<void(const message_20::Type&)> v2g_message;
+=======
+    // Request and response alike, with the complete V2GTP frame exactly as it went over the wire (what
+    // EvseV2G publishes as v2g_messages). The frame view is only valid for the duration of the call.
+    std::function<void(const V2gMessageType&, const io::StreamInputView& exi_frame)> v2g_message;
+    // The request last reported through v2g_message is answered with FAILED_SequenceError, which ends the
+    // session. Reported before that response, so a consumer deriving the session phase from v2g_message can
+    // tell the rejected request from one the session reached.
+    std::function<void()> request_out_of_sequence;
+    // Reported before the SECC picks one, so a failed negotiation is reported too (EvseV2G parity).
+    std::function<void(const message_20::SupportedAppProtocolRequest&)> ev_app_protocols;
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
     std::function<void(const std::string&)> evccid;
     std::function<void(const std::string&)> selected_protocol;
 
@@ -99,7 +111,14 @@ public:
     void dc_charge_loop_req(const feedback::DcChargeLoopReq&) const;
     void dc_max_limits(const feedback::DcMaximumLimits&) const;
     void ac_charge_loop_req(const feedback::AcChargeLoopReq&) const;
+<<<<<<< HEAD
     void v2g_message(const message_20::Type&) const;
+=======
+    // \p exi_frame is the full V2GTP frame; the engines omit it, the Session attaches it on the way through.
+    void v2g_message(const V2gMessageType&, const io::StreamInputView& exi_frame = {}) const;
+    void request_out_of_sequence() const;
+    void ev_app_protocols(const message_20::SupportedAppProtocolRequest&) const;
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
     void evcc_id(const std::string&) const;
     void selected_protocol(const std::string&) const;
 

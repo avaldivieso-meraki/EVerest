@@ -98,6 +98,87 @@ private:
 
     void update_supported_vas_services();
     std::optional<size_t> get_vas_provider_index(uint16_t service_id);
+<<<<<<< HEAD
+=======
+
+    // EV grid-event fault detector; outlives sessions (reset at SETUP_FINISHED), touched only by the charger thread.
+    GridEventEdgeDetector grid_event_detector;
+    void publish_grid_event(uint8_t condition);
+
+    // EV-negotiated DER control functions from ServiceSelection; read at ChargeParameterDiscovery to
+    // surface ev_supported_dercontrol. Reset at SETUP_FINISHED; touched only by the charger thread.
+    std::bitset<12> ev_selected_der_control_functions;
+
+    // Serializes apply_active_der_directives so the per-name update loop cannot interleave between two
+    // concurrent applies and leave a mixed DER-function map.
+    //
+    // Lock rank, outermost first: der_apply_mutex > GEL > TbdController::evse_setup (a util::monitor, not a
+    // std::mutex). Never acquired in the reverse order. Calling the controller under GEL is therefore
+    // allowed, and relay_sae_grid_code and update_der_limits_locked both do so.
+    std::mutex der_apply_mutex;
+    void apply_active_der_directives();
+    // SAE half of apply_active_der_directives. Maps on the caller's GEL snapshot without GEL held, then
+    // re-acquires it to validate against the current limits and commit. Called with der_apply_mutex held.
+    void relay_sae_grid_code(const types::grid_support::ActiveDirectiveSet& directives,
+                             iso15118::TbdController& controller_ref, float nominal_voltage_v,
+                             float nominal_frequency_hz, const iso15118::d20::DerSaeSetupConfig& current_sae,
+                             std::uint32_t applied_revision, const std::optional<module::SaeRelayInput>& applied_input);
+
+    // hlc_session_failed derivation (loop thread only, from the v2g_message and request_out_of_sequence
+    // feedback): the last V2G message handled this session, and the last one outside the SessionStop
+    // exchange, which names the phase the EV left when it ended the session with SessionStopReq. Mapped to a
+    // reason at teardown.
+    HlcMessageHistory hlc_message_history;
+    // Last published EV completion flags (DIN SPEC 70121 / ISO 15118-2 charge progress); published on
+    // change only. Reset when the session's data link ends.
+    std::optional<bool> last_charging_complete;
+    std::optional<bool> last_bulk_charging_complete;
+    // debug_mode from the setup command gates the v2g_messages and ev_app_protocol publishes (mirrors
+    // EvseV2G, which publishes both only with debugMode). Atomic: set from the command thread, read on
+    // the loop thread.
+    std::atomic_bool debug_mode{false};
+    // ISO 15118-2 and DIN report PreChargeReq targets through dc_charge_loop_req too.
+    std::atomic_bool pre_charge_active{false};
+    void report_hlc_session_failed();
+    // Clear the per-session state above; called for every end of the data link (terminate, error, pause).
+    void reset_session_state();
+
+    /// Builds the base SSLConfig: backend, V2G/MO trust-anchor paths, and the module-level
+    /// TLS flags. Carries no certificate chains. Does not depend on leaf-certificate
+    /// availability (still queries evse_security for the V2G/MO verify files).
+    iso15118::config::SSLConfig build_base_ssl_config();
+
+    /// Builds the current SSLConfig: the base config plus the valid V2G certificate chains
+    /// queried from evse_security and mapped via map_valid_chains(). The chains vector is
+    /// empty when no usable chains are available.
+    iso15118::config::SSLConfig build_current_ssl_config();
+
+    /// Subscriber for evse_security::certificate_store_update. Reads this->controller under a
+    /// null guard; the controller is created once in ready() and never reset. Delegates to
+    /// charger::handle_certificate_store_update(), which gates on relevance, rebuilds the
+    /// SSLConfig, and applies it or preserves the last-good config; rebuild exceptions are
+    /// caught there so the subscriber thread survives RPC failures.
+    void on_certificate_store_update(const types::evse_security::CertificateStoreUpdate& event);
+
+    // Re-derives the DER transfer limits and mirrors them into the controller. Call with GEL held, from
+    // every handler that writes one of its inputs.
+    void update_der_limits_locked();
+
+    // Last DER SAE derivation outcome that was logged, so a repeated derivation on unchanged inputs
+    // stays quiet. Guarded by GEL.
+    SaeDerStatus logged_sae_der_status{SaeDerStatus::NotRequested};
+    // Nominal voltage and frequency reported by the last logged Ready derivation, so a change to the
+    // advertised grid values is re-logged instead of staying hidden. Guarded by GEL.
+    std::optional<std::pair<std::uint32_t, float>> logged_sae_nominal;
+
+    // Revision of the SAE grid code last dictated from grid_support directives. Bumped only when the
+    // relay input changes, so an AC-limits re-derivation re-pushes the same revision and the session stays
+    // quiet. Guarded by GEL.
+    std::uint32_t sae_grid_code_revision{0};
+    // Relay input behind sae_grid_code_revision. Seeded with the empty set on every derivation that assigns
+    // SAE limits while the held config is still the seed (revision 0); nullopt until the first. Guarded by GEL.
+    std::optional<module::SaeRelayInput> sae_applied_input;
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
     // ev@3370e4dd-95f4-47a9-aaec-ea76f34a66c9:v1
 };
 

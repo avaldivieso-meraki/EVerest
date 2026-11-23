@@ -28,6 +28,7 @@ SCENARIO("ISO15118-20 session setup state transitions") {
     const std::vector<d20::ControlMobilityNeedsModes> control_mobility_modes = {
         {dt::ControlMode::Scheduled, dt::MobilityNeedsMode::ProvidedByEvcc}};
 
+<<<<<<< HEAD
     const d20::EvseSetupConfig evse_setup{
         evse_id,   supported_energy_services, auth_services, vas_services, cert_install, dc_limits,
         ac_limits, control_mobility_modes,    std::nullopt,  std::nullopt, std::nullopt, powersupply_limits};
@@ -35,6 +36,40 @@ SCENARIO("ISO15118-20 session setup state transitions") {
     std::optional<d20::PauseContext> pause_ctx{std::nullopt};
 
     const session::feedback::Callbacks callbacks{};
+=======
+    session::EvseSetupConfig setup{};
+    setup.evse_id = evse_id;
+    setup.supported_energy_services = supported_energy_services;
+    setup.authorization_services = auth_services;
+    setup.supported_vas_services = vas_services;
+    setup.enable_certificate_install_service = cert_install;
+    setup.dc_limits = dc_limits;
+    setup.ac_limits = ac_limits;
+    setup.der_iec_limits = std::nullopt;
+    setup.der_sae_limits = std::nullopt;
+    setup.control_mobility_modes = control_mobility_modes;
+    setup.powersupply_limits = powersupply_limits;
+    return setup;
+}
+
+} // namespace
+
+SCENARIO("ISO15118-20 session setup state transitions") {
+
+    const auto evse_id = std::string("everest se");
+
+    const auto evse_setup = make_evse_setup(evse_id);
+
+    const bool skip_app_protocol_negotiation{false};
+    bool ev_information_called{false};
+    int out_of_sequence_requests{0};
+
+    std::optional<d20::PauseContext> pause_ctx{std::nullopt};
+
+    session::feedback::Callbacks callbacks{};
+    callbacks.ev_information = [&ev_information_called](const d20::EVInformation&) { ev_information_called = true; };
+    callbacks.request_out_of_sequence = [&out_of_sequence_requests] { ++out_of_sequence_requests; };
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
 
     auto state_helper = FsmStateHelper(d20::SessionConfig(evse_setup), pause_ctx, callbacks);
     auto ctx = state_helper.get_context();
@@ -217,6 +252,7 @@ SCENARIO("ISO15118-20 session setup state transitions") {
 
             const auto& res = response_message.value();
             REQUIRE(res.response_code == dt::ResponseCode::FAILED_SequenceError);
+            REQUIRE(out_of_sequence_requests == 1);
             REQUIRE(res.service == message_20::to_underlying_value(dt::ServiceCategory::DC));
             REQUIRE(res.service_parameter_list.size() == 1);
         }

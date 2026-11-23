@@ -523,9 +523,44 @@ iso15118::session::feedback::Callbacks ISO15118_chargerImpl::create_callbacks() 
         }
     };
 
+<<<<<<< HEAD
     callbacks.v2g_message = [this](iso15118::message_20::Type id) {
         const auto v2g_message_id = convert_v2g_message_type(id);
         publish_v2g_messages({v2g_message_id});
+=======
+    callbacks.v2g_message = [this](const iso15118::V2gMessageType& id, const iso15118::io::StreamInputView& exi_frame) {
+        // Always tracked: hlc_session_failed derives its reason from the message history at teardown.
+        hlc_message_history.record(id);
+        // Published only in debug mode, mirroring EvseV2G's debugMode gate on this var. The frame is
+        // the complete V2GTP message (8-byte header + EXI payload), rendered in the same two encodings
+        // EvseV2G uses so existing log tooling can decode either one (v2g_server.cpp:275-288). xml and
+        // v2g_json stay unset: neither stack decodes the EXI back into a document.
+        if (debug_mode) {
+            types::iso15118::V2gMessages message;
+            message.id = module::conversions::to_v2g_message_id(id);
+            if (exi_frame.payload != nullptr and exi_frame.payload_len > 0) {
+                message.exi = to_hex_string(exi_frame);
+                message.exi_base64 = to_base64_string(exi_frame);
+            }
+            publish_v2g_messages(message);
+        }
+    };
+
+    callbacks.request_out_of_sequence = [this] { hlc_message_history.reject_last_request(); };
+
+    // Debug only, like EvseV2G (v2g_server.cpp:467): the protocol list the EV offered in
+    // SupportedAppProtocolReq, reported whether or not the negotiation went on to succeed.
+    callbacks.ev_app_protocols = [this](const iso15118::message_20::SupportedAppProtocolRequest& req) {
+        if (not debug_mode) {
+            return;
+        }
+        types::iso15118::AppProtocols app_protocols;
+        app_protocols.Protocols.reserve(req.app_protocol.size());
+        for (const auto& protocol : req.app_protocol) {
+            app_protocols.Protocols.push_back(convert_app_protocol(protocol));
+        }
+        publish_ev_app_protocol(app_protocols);
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
     };
 
     callbacks.evccid = [this](const std::string& evccid) { publish_evcc_id(evccid); };
@@ -685,6 +720,30 @@ iso15118::session::feedback::Callbacks ISO15118_chargerImpl::create_callbacks() 
     return callbacks;
 }
 
+<<<<<<< HEAD
+=======
+void ISO15118_chargerImpl::reset_session_state() {
+    // Per-session state that must not leak into the following session. Run at every end of the data
+    // link, pause included: EvseV2G clears the equivalent fields from v2g_ctx_init_charging_state()
+    // (v2g_ctx.cpp:104), which connection_teardown() calls before it looks at the D-LINK action, so a
+    // paused session leaves nothing behind either.
+    hlc_message_history.reset();
+    last_charging_complete.reset();
+    last_bulk_charging_complete.reset();
+    pre_charge_active = false;
+}
+
+void ISO15118_chargerImpl::report_hlc_session_failed() {
+    // Runs on the session loop thread from the DLINK_TERMINATE / DLINK_ERROR feedback.
+    if (const auto reason = hlc_failed_reason_at_teardown(hlc_message_history.last_message(),
+                                                          hlc_message_history.last_message_before_session_stop())) {
+        publish_hlc_session_failed(*reason);
+    }
+
+    reset_session_state();
+}
+
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
 void ISO15118_chargerImpl::handle_setup(types::iso15118::EVSEID& evse_id,
                                         [[maybe_unused]] types::iso15118::SaeJ2847BidiMode& sae_j2847_mode,
                                         [[maybe_unused]] bool& debug_mode) {

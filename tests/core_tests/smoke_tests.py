@@ -89,6 +89,107 @@ class DcConfigAdjustmentStrategy(EverestConfigAdjustmentStrategy):
         adjusted_config["active_modules"]["ev_manager"]["config_module"]["force_payment_option"] = self.force_payment_option
         adjusted_config["active_modules"]["imd"]["config_implementation"]["main"]["resistance_F_Ohm"] = 0 if self.fail_cable_check else 900000
         adjusted_config["active_modules"]["evse_manager"]["config_module"]["cable_check_wait_number_of_imd_measurements"] = self.cable_check_measurements
+<<<<<<< HEAD
+=======
+        if self.fuse_limit_A is not None:
+            adjusted_config["active_modules"]["grid_connection_point"]["config_module"]["fuse_limit_A"] = self.fuse_limit_A
+        return adjusted_config
+
+
+class RejectAuthorizationAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """
+    Adjustment strategy to reject every token, so the EV stays in the authorization loop
+    """
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        adjusted_config["active_modules"]["token_validator"]["config_implementation"]["main"]["validation_result"] = "Invalid"
+        return adjusted_config
+
+
+class DcSupplyZeroMinCurrentAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """
+    Adjustment strategy to let the simulated DC supply output 0 A instead of its 1 A minimum
+    """
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        adjusted_config["active_modules"]["powersupply_dc"]["config_implementation"] = {"main": {"min_current": 0}}
+        return adjusted_config
+
+
+class D20TlsConfigAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """Force a specific TLS version on the direct-d20 SIL config so the
+    Evse15118D20 ConnectionSSL adapter performs the handshake end to end.
+
+    Unlike the IsoMux configs (where IsoMux terminates TLS and the d20
+    backend only sees decrypted plaintext), config-sil-dc-d20.yaml wires
+    EvseManager's `hlc` straight to Evse15118D20, which runs its own SDP
+    server and therefore drives the ConnectionSSL / tls::Server adapter.
+
+    tls13=False -> EV offers TLS 1.2 only and presents no client cert; the
+                   SECC accepts the 1.2 offer and requires no client cert
+                   (server-authenticated / unilateral TLS).
+    tls13=True  -> EV offers TLS 1.3 and presents its VEHICLE client cert;
+                   the SECC is pinned to TLS 1.3 (so the session cannot fall
+                   back to 1.2) and the verify-on-1.3 upgrade requires that
+                   client cert (mutual TLS, as ISO 15118-20 mandates).
+    """
+
+    def __init__(self, tls13: bool):
+        self.tls13 = tls13
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        ev = adjusted_config["active_modules"]["iso15118_car"]["config_module"]
+        secc = adjusted_config["active_modules"]["iso15118_charger"]["config_module"]
+
+        ev["tls"] = "require"
+        ev["tls_version"] = "1.3" if self.tls13 else "1.2"
+
+        if self.tls13:
+            secc["tls_negotiation_strategy"] = "ENFORCE_TLS"
+            secc["enforce_tls_1_3"] = True
+        else:
+            secc["tls_negotiation_strategy"] = "ACCEPT_CLIENT_OFFER"
+            secc["enforce_tls_1_3"] = False
+        return adjusted_config
+
+
+class D20ScheduledModeAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """
+    Adjustment strategy to run the direct-d20 SIL session in Scheduled control mode
+    """
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        adjusted_config["active_modules"]["iso15118_charger"]["config_module"]["supported_scheduled_mode"] = True
+        adjusted_config["active_modules"]["iso15118_car"]["config_module"]["control_mode"] = "Scheduled"
+        return adjusted_config
+
+
+class TlsVersionAutoAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """Run the EV with tls require and tls_version auto, offering ISO 15118-20 and ISO 15118-2,
+    so the negotiated TLS version picks the protocol: -20 over TLS 1.3, -2 over TLS 1.2.
+    Listed after the strategy that configures the SECC, it overrides that strategy's EV TLS keys.
+    """
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        ev = adjusted_config["active_modules"]["iso15118_car"]["config_module"]
+        ev["tls"] = "require"
+        ev["tls_version"] = "auto"
+        ev["supported_protocols"] = "ISO15118_20,ISO15118_2"
+        return adjusted_config
+
+
+class EvseV2gForceTlsAdjustmentStrategy(EverestConfigAdjustmentStrategy):
+    """Make the EvseV2G SECC require TLS; it serves ISO 15118-2 over TLS 1.2 only."""
+
+    def adjust_everest_configuration(self, everest_config: Dict):
+        adjusted_config = deepcopy(everest_config)
+        adjusted_config["active_modules"]["iso15118_charger"]["config_module"]["tls_security"] = "force"
+>>>>>>> 9165474 (fix(EvseV2G,Evse15118D20): report HLC failure for a SessionStop before charging (#3070))
         return adjusted_config
 
 
@@ -435,6 +536,16 @@ async def run_basic_session(test_controller: TestController, session_event_mock,
     
     if finish_with_plug_out:
         await end_session(test_controller, session_event_mock)
+
+async def wait_for_mock_called(mock, timeout=30):
+    """Wait until the mock was called at least once."""
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < timeout:
+        if mock.called:
+            return
+        await asyncio.sleep(0.1)
+    raise TimeoutError("Timeout waiting for a publication")
+
 
 async def wait_for_hlc_session_failed_with_reason(mock, expected_reason, timeout=30):
     """Wait for an hlc_session_failed publication with a specific reason.
@@ -1416,6 +1527,83 @@ async def test_iso15118_pnc_only_ev_authorization_failed(
 
     await wait_for_hlc_session_failed_with_reason(hlc_session_failed_mock, "AuthorizationFailed")
     test_controller.plug_out()
+
+def hlc_stack_params(*extra_strategies):
+    """The DC SIL setups covering both SECC stacks: Evse15118D20 with ISO 15118-2 and -20, EvseV2G with ISO 15118-2."""
+    setups = [
+        ("evse15118d20_iso2", "config-sil-dc.yaml", DcConfigAdjustmentStrategy()),
+        ("evse15118d20_iso20", "config-sil-dc-d20.yaml", D20TlsConfigAdjustmentStrategy(tls13=False)),
+        ("evsev2g_iso2", "config-sil-dc-evsev2g.yaml", DcConfigAdjustmentStrategy()),
+    ]
+    return [
+        pytest.param(
+            name,
+            marks=[
+                pytest.mark.everest_core_config(config),
+                pytest.mark.everest_config_adaptions(strategy, *extra_strategies),
+            ],
+            id=name,
+        )
+        for name, config, strategy in setups
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.xdist_group(name="ISO15118")
+@pytest.mark.probe_module(
+    connections={
+        "evse_manager": [Requirement("evse_manager", "evse")],
+        "charger": [Requirement("iso15118_charger", "charger")],
+    }
+)
+@pytest.mark.parametrize("hlc_stack", hlc_stack_params(RejectAuthorizationAdjustmentStrategy()))
+async def test_iso15118_dc_session_stop_during_authorization_reports_authorization_failed(
+    hlc_stack, test_controller: TestController, everest_core: EverestCore
+):
+    """
+    Test that an EV giving up in the authorization loop with a regular SessionStopReq, as it does
+    when its V2G_EVCC_Ongoing_Timer expires, results in AuthorizationFailed.
+    """
+    probe_module, _, _, hlc_session_failed_mock = await setup_session_mocks(
+        test_controller, everest_core
+    )
+    require_auth_eim_mock = Mock()
+    probe_module.subscribe_variable("charger", "require_auth_eim", require_auth_eim_mock)
+
+    test_controller.plug_in_dc_iso()
+    await wait_for_mock_called(require_auth_eim_mock)
+    # Let the EV repeat its authorization request, so the SessionStopReq follows one.
+    await asyncio.sleep(1)
+    assert not hlc_session_failed_mock.called
+
+    test_controller.plug_out_iso()
+
+    await wait_for_hlc_session_failed_with_reason(hlc_session_failed_mock, "AuthorizationFailed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.xdist_group(name="ISO15118")
+@pytest.mark.probe_module(
+    connections={"evse_manager": [Requirement("evse_manager", "evse")]}
+)
+@pytest.mark.parametrize("hlc_stack", hlc_stack_params())
+async def test_iso15118_dc_session_stopped_by_ev_reports_no_hlc_session_failure(
+    hlc_stack, test_controller: TestController, everest_core: EverestCore
+):
+    """Test that a charging session the EV ends regularly publishes no hlc_session_failed."""
+    _, session_event_mock, powermeter_mock, hlc_session_failed_mock = await setup_session_mocks(
+        test_controller, everest_core
+    )
+
+    await run_basic_session(
+        test_controller, session_event_mock, powermeter_mock, "plug_in_dc_iso", finish_with_plug_out=False
+    )
+    test_controller.plug_out_iso()
+    await wait_for_session_events(session_event_mock, SESSION_END_EVENTS)
+    await asyncio.sleep(2)
+
+    assert not hlc_session_failed_mock.called, hlc_session_failed_mock.call_args_list
+
 
 @pytest.mark.asyncio
 @pytest.mark.probe_module(
