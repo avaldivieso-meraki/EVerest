@@ -486,6 +486,20 @@ SCENARIO("Check ManagerConfig Constructor", "[!throws]") {
         THEN("It should not throw at all") {
             CHECK_NOTHROW(Everest::ManagerConfig(ms));
         }
+        THEN("Values taken from the manifest defaults are marked as such") {
+            auto mc = Everest::ManagerConfig(ms);
+            const auto config_params =
+                mc.get_module_configurations().at("valid_module").configuration_parameters.at("!module");
+            const auto source_of = [&config_params](const std::string& name) {
+                const auto it = std::find_if(config_params.begin(), config_params.end(),
+                                             [&name](const auto& param) { return param.name == name; });
+                REQUIRE(it != config_params.end());
+                return it->source;
+            };
+            CHECK(source_of("valid_config_entry") == everest::config::ConfigurationSource::User);
+            CHECK(source_of("valid_config_entry_with_default") == everest::config::ConfigurationSource::Default);
+            CHECK(source_of("valid_bool_config_entry") == everest::config::ConfigurationSource::Default);
+        }
     }
     GIVEN("A valid config with a valid module and a user-config applied") {
         auto ms = Everest::ManagerSettings(bin_dir + "valid_module_config_userconfig/",

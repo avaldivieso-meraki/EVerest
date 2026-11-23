@@ -202,6 +202,7 @@ ParsedConfigMap parse_config_map(const json& config_map_schema,
         }
 
         json config_entry_value;
+        auto source = ConfigurationSource::User;
         if (config_parameter_map.find(config_entry_name) != config_parameter_map.end()) {
             const auto& expected_datatype = config_parameter_map.at(config_entry_name).characteristics.datatype;
             const auto& actual_datatype = string_to_datatype(config_entry.at("type"));
@@ -225,6 +226,7 @@ ParsedConfigMap parse_config_map(const json& config_map_schema,
             }
         } else if (config_entry.contains("default")) {
             config_entry_value = config_entry.at("default"); // use default value defined in manifest
+            source = ConfigurationSource::Default;
         }
         json_validator validator(loader, format_checker);
         validator.set_root_schema(config_entry);
@@ -240,6 +242,7 @@ ParsedConfigMap parse_config_map(const json& config_map_schema,
 
         ConfigurationParameter config_param;
         config_param.name = config_entry_name;
+        config_param.source = source;
         config_param.characteristics.datatype = string_to_datatype(config_entry.at("type"));
         config_param.characteristics.mutability = string_to_mutability(config_entry.at("mutability"));
         // TODO: add unit

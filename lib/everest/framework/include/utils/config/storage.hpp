@@ -47,7 +47,7 @@ public:
     virtual GetConfigurationParameterResponse
     get_configuration_parameter(const ConfigurationParameterIdentifier& identifier) = 0;
 
-    /// \brief Writes single configuration parameter to persistent storage
+    /// \brief Writes single configuration parameter to persistent storage, marking it as ConfigurationSource::User
     /// \param identifier Identifies configuration parameter
     /// \param value
     /// \return Response with status of operation
@@ -58,11 +58,12 @@ public:
     /// \param identifier Identifies configuration parameter
     /// \param characteristics of the configuration parameter
     /// \param value
+    /// \param source origin of \p value
     /// \return Response with status of operation
     virtual GetSetResponseStatus
     write_configuration_parameter(const ConfigurationParameterIdentifier& identifier,
-                                  const ConfigurationParameterCharacteristics characteristics,
-                                  const std::string& value) = 0;
+                                  const ConfigurationParameterCharacteristics characteristics, const std::string& value,
+                                  ConfigurationSource source) = 0;
 };
 
 } // namespace everest::config

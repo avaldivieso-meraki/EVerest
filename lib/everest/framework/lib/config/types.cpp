@@ -348,6 +348,25 @@ std::string mutability_to_string(const Mutability mutability) {
     throw std::out_of_range("Could not convert Mutability to string");
 }
 
+ConfigurationSource string_to_configuration_source(const std::string& str) {
+    if (str == "default") {
+        return ConfigurationSource::Default;
+    } else if (str == "user") {
+        return ConfigurationSource::User;
+    }
+    throw std::out_of_range("Could not convert: " + str + " to ConfigurationSource");
+}
+
+std::string configuration_source_to_string(const ConfigurationSource source) {
+    switch (source) {
+    case ConfigurationSource::Default:
+        return "default";
+    case ConfigurationSource::User:
+        return "user";
+    }
+    throw std::out_of_range("Could not convert ConfigurationSource to string");
+}
+
 } // namespace everest::config
 
 NLOHMANN_JSON_NAMESPACE_BEGIN

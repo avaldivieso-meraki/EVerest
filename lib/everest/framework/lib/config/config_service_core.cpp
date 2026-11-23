@@ -103,7 +103,8 @@ find_parameter_or_explain(const ec::ConfigurationParameterIdentifier& id, ec::Mo
 bool persist_parameter_change(ec::SqliteStorage& storage, const ec::ConfigurationParameterIdentifier& identifier,
                               const ec::ConfigurationParameterCharacteristics& characteristics,
                               const std::string& value) {
-    const auto write_status = storage.write_configuration_parameter(identifier, characteristics, value);
+    const auto write_status =
+        storage.write_configuration_parameter(identifier, characteristics, value, ec::ConfigurationSource::User);
     if (write_status != ec::GetSetResponseStatus::OK) {
         EVLOG_error << "ConfigServiceCore: Couldn't persist the configuration parameter change to storage; "
                        "the change will not apply on restart.";
@@ -555,7 +556,8 @@ void ConfigServiceCore::apply_active_slot_updates(const std::vector<ConfigParame
             auto mirror_status = ec::GetSetResponseStatus::Failed;
             try {
                 mirror_status = m_persistence_mirror->write_configuration_parameter(
-                    update.identifier, in_memory_parameter->characteristics, update.value);
+                    update.identifier, in_memory_parameter->characteristics, update.value,
+                    ec::ConfigurationSource::User);
             } catch (const std::exception& e) {
                 EVLOG_error << "ConfigServiceCore: Persisting the configuration parameter change to the "
                                "user-config failed: "
@@ -585,6 +587,7 @@ void ConfigServiceCore::apply_active_slot_updates(const std::vector<ConfigParame
         if (modules_down) {
             in_memory_parameter->value =
                 ec::parse_config_value(in_memory_parameter->characteristics.datatype, update.value);
+            in_memory_parameter->source = ec::ConfigurationSource::User;
         }
 
         // Now test if the module applies the update at runtime
@@ -610,6 +613,7 @@ void ConfigServiceCore::apply_active_slot_updates(const std::vector<ConfigParame
                     const auto parsed_value =
                         ec::parse_config_value(in_memory_parameter->characteristics.datatype, update.value);
                     in_memory_parameter->value = parsed_value;
+                    in_memory_parameter->source = ec::ConfigurationSource::User;
                     break;
                 }
                 case SetParameterResponse::ModuleReplied_RequiresRestart:
@@ -659,8 +663,8 @@ void ConfigServiceCore::apply_inactive_slot_updates(int slot_id, const std::vect
             continue;
         }
 
-        const auto write_status =
-            storage->write_configuration_parameter(update.identifier, parameter->characteristics, update.value);
+        const auto write_status = storage->write_configuration_parameter(update.identifier, parameter->characteristics,
+                                                                         update.value, ec::ConfigurationSource::User);
         if (write_status == ec::GetSetResponseStatus::OK) {
             per_result.status = SetConfigParameterResultEnum::WillApplyOnRestart;
             event.updates.push_back(

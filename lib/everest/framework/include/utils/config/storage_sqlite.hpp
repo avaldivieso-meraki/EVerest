@@ -72,7 +72,7 @@ public:
     /// target module does not exist in this instance's config slot.
     GetSetResponseStatus write_configuration_parameter(const ConfigurationParameterIdentifier& identifier,
                                                        const ConfigurationParameterCharacteristics characteristics,
-                                                       const std::string& value) override;
+                                                       const std::string& value, ConfigurationSource source) override;
 
 private:
     std::shared_ptr<everest::db::sqlite::ConnectionInterface> m_db;
