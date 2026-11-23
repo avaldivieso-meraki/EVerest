@@ -5,8 +5,8 @@ info:
   title: 'EVerest API definition for OCPP device model owners - CLIENT side (MODULE)'
   version: 1.0.0
   description: >-
-    API for EVerest API clients that add components and variables to the device model of an OCPP 2.x service at
-    runtime, next to those of the component config. The client acts for one or more owners. Each variable has one
+    API for EVerest API clients that add components and variables to the device model of an OCPP service at
+    runtime, next to those of the JSON component config. The client acts for one or more owners. Each variable has one
     owner, which keeps its value current, receives the writes to it and keeps its persistent attributes across
     restarts.
 
@@ -184,9 +184,10 @@ components:
         The outcome of one registration, published once for every registration the OCPP service applied, at startup
         and at runtime. A registration replaced by a newer one of the same owner before it was applied, at startup
         or before the OCPP service started, is answered only through the newer one. A registration the device model
-        fails to apply is logged and not answered, and its owner is dropped. No reply is expected. A registration that does not match the schema is
-        answered with Invalid by this module, for its owner, or for the module id when it names none; one whose owner
-        cannot be read, because it is not a JSON object or its owner is not a non-empty string, gets no answer.
+        fails to apply is answered with Rejected, and its owner is dropped. No reply is expected. A registration that
+        does not match the schema is answered with Invalid by this module, for its owner, or for the module id when it
+        names none or its owner cannot be read, because it is not a JSON object or its owner is not a non-empty
+        string.
         Every client of the module receives every result, so a client picks its own by owner; an Invalid for an owner
         the client holds may come from another client's malformed registration naming it, which changes nothing.
       contentType: application/json
@@ -602,9 +603,10 @@ components:
             OCPP 1.6 configuration key that serves the Actual attribute of the variable while the registration lasts,
             when the OCPP service runs OCPP 1.6; ignored with OCPP 2.x. Either a key that OCPP 1.6 does not define, or
             a built-in key stored in OCPP16LegacyCtrlr, LightIntensity for example, which the variable then holds
-            instead. The key mapping file of the OCPP service reserves every key and variable it names. A variable
-            whose key is taken is rejected with Ocpp16KeyInUse, one whose key cannot be mapped to it with
-            Ocpp16KeyInvalid.
+            instead. The key mapping file of the OCPP service reserves every key and variable it names; declaring the
+            key the file maps to the same variable leaves the key to the file, or maps it to the variable until the
+            next start when the file's entry was dropped at startup. A variable whose key is taken is rejected with
+            Ocpp16KeyInUse, one whose key cannot be mapped to it with Ocpp16KeyInvalid.
           type: string
           minLength: 1
           maxLength: 50
@@ -654,11 +656,15 @@ components:
         - Invalid: The registration does not match this schema, a name longer than 50 characters or an unknown
           property for example. This module answers it itself; nothing was passed on, and an earlier registration
           of the owner stays in place.
+        - Rejected: The OCPP service failed to apply the registration, because its storage failed for example. The
+          owner is dropped: neither this registration nor an earlier one of the owner stays in the device model, and
+          the owner name is free. The client may register the owner again.
       type: string
       enum:
         - Accepted
         - OwnerInUse
         - Invalid
+        - Rejected
     RegistrationRejectionReason:
       description: >-
         Why a variable of a registration was rejected

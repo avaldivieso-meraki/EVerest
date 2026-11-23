@@ -8,8 +8,9 @@
 
    This API is **experimental**: its topics and types may change without further notice.
 
-The module lets a client outside EVerest add components and variables to the OCPP 2.x device model, as an owner of
-the ``ocpp_device_model`` interface. See :ref:`howto-ocpp-device-model` for a walk-through.
+The module lets a client outside EVerest add components and variables to the OCPP :term:`device model`, as an
+:term:`owner <external owner>` of the ``ocpp_device_model`` interface. See :ref:`howto-ocpp-device-model` for a
+walk-through and the :ref:`reference-ocpp-device-model-glossary` for the terms used here.
 
 The OCPP module uses the module through its ``device_model`` requirement:
 
@@ -51,7 +52,8 @@ A write to a registered variable is answered ``Rejected`` when the client does n
 The three timeouts are at most 100 s each, below the 120 s after which EVerest aborts a command. A registration that
 does not fit the types of the specification, a string beyond its maximum length for example, is not passed on; the
 module answers it on ``e2m/set_registration_result`` with ``Invalid`` for its owner, or for the module id when it names
-none, unless the message is not a JSON object or its owner is not a non-empty string. A value change that does not
+none or its owner cannot be read, because the message is not a JSON object or its owner is not a non-empty string. A
+value change that does not
 fit the types is ignored and logged.
 
 Communication supervision is per module instance, not per client or owner. ``e2m/heartbeat`` is one heartbeat that
