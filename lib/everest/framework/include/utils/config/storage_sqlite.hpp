@@ -63,8 +63,8 @@ public:
     GetConfigurationParameterResponse
     get_configuration_parameter(const ConfigurationParameterIdentifier& identifier) override;
 
-    /// \brief Updates the value of an existing configuration parameter; returns NotFound if no matching parameter
-    /// exists.
+    /// \brief Updates the value of an existing configuration parameter and marks it as ConfigurationSource::User;
+    /// returns NotFound if no matching parameter exists.
     GetSetResponseStatus update_configuration_parameter(const ConfigurationParameterIdentifier& identifier,
                                                         const std::string& value) override;
 

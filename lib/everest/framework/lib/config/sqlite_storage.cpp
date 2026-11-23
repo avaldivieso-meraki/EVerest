@@ -485,15 +485,9 @@ GenericResponseStatus SqliteStorage::write_module_config_items(const ModuleConfi
                 identifier.module_implementation_id = impl_id;
                 identifier.configuration_parameter_name = param.name;
 
-                std::string value;
-                if (std::holds_alternative<std::string>(param.value)) {
-                    value = std::get<std::string>(param.value);
-                } else {
-                    const nlohmann::json temp = param.value;
-                    value = temp.dump();
-                }
-                if (write_configuration_parameter(identifier, param.characteristics, value, param.source) !=
-                    GetSetResponseStatus::OK) {
+                if (write_configuration_parameter(identifier, param.characteristics,
+                                                  config_entry_to_storage_string(param.value),
+                                                  param.source) != GetSetResponseStatus::OK) {
                     EVLOG_error << "Failed to write configuration parameter for module: " << module_id
                                 << ", param: " << identifier.configuration_parameter_name;
                     return GenericResponseStatus::Failed;

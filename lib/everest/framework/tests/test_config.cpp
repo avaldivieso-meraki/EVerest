@@ -1017,3 +1017,56 @@ SCENARIO("ConfigurationParameterCharacteristics serialization of min_value and m
         }
     }
 }
+
+TEST_CASE("Preloaded values that originated from a manifest default follow the manifest", "[config]") {
+    using everest::config::ConfigurationSource;
+    using everest::config::Datatype;
+
+    const auto bin_dir = Everest::tests::get_bin_dir().string() + "/";
+    const Everest::ManagerSettings ms(bin_dir + "valid_module_config/", bin_dir + "valid_module_config/config.yaml");
+    auto module_configs = Everest::ManagerConfig(ms).get_module_configurations();
+    auto& stored_params = module_configs.at("valid_module").configuration_parameters.at("!module");
+
+    const auto find_param = [](auto& params, const std::string& name) -> auto& {
+        const auto it =
+            std::find_if(params.begin(), params.end(), [&name](const auto& param) { return param.name == name; });
+        REQUIRE(it != params.end());
+        return *it;
+    };
+    const auto validated_param = [&](const std::string& name) {
+        auto validated = Everest::validate_preloaded_module_configs(ms, module_configs);
+        return find_param(validated.module_configs.at("valid_module").configuration_parameters.at("!module"), name);
+    };
+
+    auto& with_default = find_param(stored_params, "valid_config_entry_with_default");
+    REQUIRE(with_default.source == ConfigurationSource::Default);
+
+    SECTION("A stale default value is replaced by the manifest default") {
+        with_default.value = 7.0;
+        const auto param = validated_param("valid_config_entry_with_default");
+        CHECK(std::get<double>(param.value) == 42);
+        CHECK(param.source == ConfigurationSource::Default);
+    }
+    SECTION("A user value is kept") {
+        with_default.value = 7.0;
+        with_default.source = ConfigurationSource::User;
+        const auto param = validated_param("valid_config_entry_with_default");
+        CHECK(std::get<double>(param.value) == 7);
+        CHECK(param.source == ConfigurationSource::User);
+    }
+    SECTION("A default value of a different datatype adopts the manifest default and its datatype") {
+        with_default.value = std::string("stale");
+        with_default.characteristics.datatype = Datatype::String;
+        const auto param = validated_param("valid_config_entry_with_default");
+        CHECK(std::get<double>(param.value) == 42);
+        CHECK(param.characteristics.datatype == Datatype::Decimal);
+        CHECK(param.source == ConfigurationSource::Default);
+    }
+    SECTION("A default value without a manifest default is kept as user value") {
+        auto& without_default = find_param(stored_params, "valid_config_entry");
+        without_default.source = ConfigurationSource::Default;
+        const auto param = validated_param("valid_config_entry");
+        CHECK(std::get<std::string>(param.value) == "hello there");
+        CHECK(param.source == ConfigurationSource::User);
+    }
+}

@@ -201,9 +201,15 @@ ParsedConfigMap parse_config_map(const json& config_map_schema,
             throw ConfigParseException(ConfigParseException::MISSING_ENTRY, config_entry_name);
         }
 
+        const auto stored = config_parameter_map.find(config_entry_name);
+        // a value that originated from a manifest default follows that default, even if its datatype changed
+        const bool follows_manifest_default = stored != config_parameter_map.end() and
+                                              stored->second.source == ConfigurationSource::Default and
+                                              config_entry.contains("default");
+
         json config_entry_value;
         auto source = ConfigurationSource::User;
-        if (config_parameter_map.find(config_entry_name) != config_parameter_map.end()) {
+        if (stored != config_parameter_map.end() and not follows_manifest_default) {
             const auto& expected_datatype = config_parameter_map.at(config_entry_name).characteristics.datatype;
             const auto& actual_datatype = string_to_datatype(config_entry.at("type"));
             if (expected_datatype != actual_datatype) {

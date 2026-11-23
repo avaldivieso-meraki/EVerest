@@ -31,6 +31,13 @@ std::string config_entry_to_string(const everest::config::ConfigEntry& entry) {
     return std::visit(VisitConfigEntry{}, entry);
 }
 
+std::string config_entry_to_storage_string(const ConfigEntry& entry) {
+    if (const auto* str = std::get_if<std::string>(&entry)) {
+        return *str;
+    }
+    return nlohmann::json(entry).dump();
+}
+
 bool ConfigurationParameter::validate_type() const {
     return std::visit(
         [&](auto&& arg) -> bool {

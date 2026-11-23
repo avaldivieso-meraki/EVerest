@@ -146,6 +146,9 @@ struct VisitConfigEntry {
 
 std::string config_entry_to_string(const everest::config::ConfigEntry& entry);
 
+/// \brief Lossless string representation of \p entry as it is persisted in the configuration database
+std::string config_entry_to_storage_string(const ConfigEntry& entry);
+
 enum class Mutability {
     ReadOnly,
     ReadWrite,

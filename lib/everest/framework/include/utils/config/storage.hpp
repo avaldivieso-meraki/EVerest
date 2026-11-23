@@ -47,7 +47,8 @@ public:
     virtual GetConfigurationParameterResponse
     get_configuration_parameter(const ConfigurationParameterIdentifier& identifier) = 0;
 
-    /// \brief Writes single configuration parameter to persistent storage, marking it as ConfigurationSource::User
+    /// \brief Updates the value of an existing configuration parameter in persistent storage. Storages that record
+    /// a value's origin mark it as ConfigurationSource::User.
     /// \param identifier Identifies configuration parameter
     /// \param value
     /// \return Response with status of operation
