@@ -45,16 +45,17 @@ V16KeyBinder::V16KeyBinder(ocpp::v16::VariableResolver& resolver, ocpp::v2::Devi
 }
 
 std::optional<std::pair<ocpp::v2::RegistrationRejectionReason, std::string>>
-V16KeyBinder::find_refusal(const std::string& key, const Target& target,
-                           const ocpp::v2::RegisteredVariable& registered) const {
+V16KeyBinder::find_refusal(const std::string& key, const Target& target, const ocpp::v2::RegisteredVariable& registered,
+                           const bool of_the_file) const {
     using ocpp::v2::RegistrationRejectionReason;
     const auto& [component, variable] = target;
 
-    if (const auto it = this->file_key_by_target.find(target); it != this->file_key_by_target.end()) {
+    if (const auto it = this->file_key_by_target.find(target);
+        not of_the_file and it != this->file_key_by_target.end()) {
         return std::make_pair(RegistrationRejectionReason::Ocpp16KeyInUse,
                               "the key mapping file maps the variable to key '" + it->second + "'");
     }
-    if (this->file_mappings.find(key) != this->file_mappings.end()) {
+    if (not of_the_file and this->file_mappings.find(key) != this->file_mappings.end()) {
         return std::make_pair(RegistrationRejectionReason::Ocpp16KeyInUse,
                               std::string{"the key mapping file maps the key to another variable"});
     }
@@ -102,13 +103,15 @@ V16KeyBinder::bind(const std::string& owner, const std::vector<ocpp::v2::Registe
         if (registered == nullptr) {
             continue;
         }
-        // left to the file, which serves the key once its entry is usable
-        if (const auto it = this->file_mappings.find(declared.key); it != this->file_mappings.end() and
-                                                                    it->second.first == declared.component and
-                                                                    it->second.second == declared.variable) {
+        const auto file_entry = this->file_mappings.find(declared.key);
+        const bool of_the_file = file_entry != this->file_mappings.end() and file_entry->second == target;
+        auto refusal = this->find_refusal(declared.key, target, *registered, of_the_file);
+        // Left to the file before the configuration applied it, and while its entry is in effect. An entry dropped at
+        // startup, because its target was not registered yet, stays dropped until the next start.
+        if (of_the_file and not refusal.has_value() and
+            (not this->file_mappings_loaded or this->resolver.key_to_cv(declared.key) == target)) {
             continue;
         }
-        auto refusal = this->find_refusal(declared.key, target, *registered);
         if (not refusal.has_value()) {
             if (const auto holder = this->resolver.add_owner_key(declared.key, declared.component, declared.variable)) {
                 refusal = std::make_pair(ocpp::v2::RegistrationRejectionReason::Ocpp16KeyInUse, holder.value());
@@ -157,6 +160,10 @@ void V16KeyBinder::unbind(const std::string& owner) {
     }
     this->remove(entry->second);
     handle->erase(entry);
+}
+
+void V16KeyBinder::on_file_mappings_loaded() {
+    this->file_mappings_loaded = true;
 }
 
 } // namespace ocpp_multi

@@ -244,10 +244,14 @@ async def test_undecodable_registration_is_answered_invalid(
     assert await asyncio.wait_for(results.get(), 5) == {
         "owner": "device_model_api", "status": "Invalid", "rejected": []}
 
-    # nothing to address the result to
-    await publish(client, everest_core, "m2e/registration", {"owner": "", "components": []})
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(results.get(), 1)
+    # an owner that cannot be read is answered for the module id
+    for unreadable in ({"owner": "", "components": []}, {"owner": 5, "components": []}, ["meter_1"]):
+        await publish(client, everest_core, "m2e/registration", unreadable)
+        assert await asyncio.wait_for(results.get(), 5) == {
+            "owner": "device_model_api", "status": "Invalid", "rejected": []}
+    await client.publish(topic(everest_core, "m2e/registration"), "not json")
+    assert await asyncio.wait_for(results.get(), 5) == {
+        "owner": "device_model_api", "status": "Invalid", "rejected": []}
 
 
 @pytest.mark.asyncio

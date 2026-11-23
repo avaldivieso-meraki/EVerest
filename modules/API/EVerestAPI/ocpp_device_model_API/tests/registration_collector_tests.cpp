@@ -275,9 +275,9 @@ TEST(OwnerOfUndecodable, a_registration_without_owner_belongs_to_the_module_id) 
     EXPECT_EQ(owner_of_undecodable(R"({"components": [], "unknown": true})", module_id), module_id);
 }
 
-TEST(OwnerOfUndecodable, no_owner_when_it_cannot_be_told) {
-    EXPECT_EQ(owner_of_undecodable("not json", module_id), std::nullopt);
-    EXPECT_EQ(owner_of_undecodable(R"(["meter_1"])", module_id), std::nullopt);
-    EXPECT_EQ(owner_of_undecodable(R"({"owner": ""})", module_id), std::nullopt);
-    EXPECT_EQ(owner_of_undecodable(R"({"owner": 5})", module_id), std::nullopt);
+TEST(OwnerOfUndecodable, an_owner_that_cannot_be_read_is_the_module_id) {
+    EXPECT_EQ(owner_of_undecodable("not json", module_id), module_id);
+    EXPECT_EQ(owner_of_undecodable(R"(["meter_1"])", module_id), module_id);
+    EXPECT_EQ(owner_of_undecodable(R"({"owner": ""})", module_id), module_id);
+    EXPECT_EQ(owner_of_undecodable(R"({"owner": 5})", module_id), module_id);
 }

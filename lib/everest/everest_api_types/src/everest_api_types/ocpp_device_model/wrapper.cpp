@@ -177,6 +177,7 @@ RegistrationStatus_Internal to_internal_api(RegistrationStatus_External const& v
         enum_case(Accepted);
         enum_case(OwnerInUse);
         enum_case(Invalid);
+        enum_case(Rejected);
     }
     throw std::out_of_range("Unexpected value for ocpp_device_model::RegistrationStatus_External");
 }
@@ -188,6 +189,7 @@ RegistrationStatus_External to_external_api(RegistrationStatus_Internal const& v
         enum_case(Accepted);
         enum_case(OwnerInUse);
         enum_case(Invalid);
+        enum_case(Rejected);
     }
     throw std::out_of_range("Unexpected value for ocpp_device_model::RegistrationStatus_Internal");
 }

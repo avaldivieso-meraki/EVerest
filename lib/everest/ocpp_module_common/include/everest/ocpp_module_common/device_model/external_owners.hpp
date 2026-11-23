@@ -65,7 +65,7 @@ public:
 
     /// \brief Applies a registration that the connection \p index published. Registrations of one connection must
     /// not be applied concurrently, which the framework ensures for the publications of one variable. A registration
-    /// the device model fails to apply is logged and not answered, and its owner is dropped, which frees its name. A
+    /// the device model fails to apply is answered Rejected, and its owner is dropped, which frees its name. A
     /// registration with a variable that does not fit the OCPP types is answered Invalid and changes nothing.
     void on_registration(std::size_t index, const types::ocpp_device_model::Registration& registration);
 

@@ -217,4 +217,75 @@ TEST_F(V16KeyBinderTest, KeysAndVariablesTheStackOwnsAreRefused) {
               RegistrationRejectionReason::Ocpp16KeyInvalid);
 }
 
+/// \brief The key mapping file overrides LightIntensity with Lamp.Intensity
+class V16KeyBinderFileOverrideTest : public ::testing::Test {
+protected:
+    static ocpp::v2::Ocpp16KeyMappings override_mappings() {
+        return {{"LightIntensity", {make_component("Lamp"), make_variable("Intensity")}}};
+    }
+
+    V16KeyBinderFileOverrideTest() : m_binder(m_resolver, m_device_model, override_mappings()) {
+        m_device_model.add(make_component("OCPP16LegacyCtrlr"), make_variable("LightIntensity"), "12");
+        m_device_model.set_data_type(make_component("OCPP16LegacyCtrlr"), make_variable("LightIntensity"),
+                                     ocpp::v2::DataEnum::integer);
+    }
+
+    std::vector<ocpp::v2::RejectedVariable> bind_intensity(ocpp::v2::DataEnum data_type) {
+        ocpp::v2::VariableAttribute attribute;
+        attribute.type = ocpp::v2::AttributeEnum::Actual;
+        attribute.value = "1";
+        ocpp::v2::RegisteredVariable registered;
+        registered.variable = make_variable("Intensity");
+        registered.characteristics.dataType = data_type;
+        registered.attributes.push_back(attribute);
+        const auto component = make_component("Lamp");
+        return m_binder.bind("lamp", {{component, {registered}}},
+                             {DeclaredOcpp16Key{component, make_variable("Intensity"), "LightIntensity"}});
+    }
+
+    std::string intensity_target() const {
+        return m_resolver.known_key_to_cv(ocpp::v16::keys::valid_keys::LightIntensity)->first.name.get();
+    }
+
+    stubs::DeviceModelStub m_device_model;
+    // The file layer is filled by load(), which runs after the startup registrations
+    ocpp::v16::VariableResolver m_resolver;
+    ocpp_multi::V16KeyBinder m_binder;
+};
+
+TEST_F(V16KeyBinderFileOverrideTest, FileKeyBeforeLoadIsLeftToTheFile) {
+    EXPECT_TRUE(bind_intensity(ocpp::v2::DataEnum::integer).empty());
+    EXPECT_FALSE(m_resolver.is_overridden(ocpp::v16::keys::valid_keys::LightIntensity));
+}
+
+// load() drops the file entry for the same reason, so the key would serve nothing
+TEST_F(V16KeyBinderFileOverrideTest, FileKeyForAnUnusableTargetIsRefused) {
+    const auto rejected = bind_intensity(ocpp::v2::DataEnum::string);
+    ASSERT_EQ(rejected.size(), 1u);
+    EXPECT_EQ(rejected.front().reason, RegistrationRejectionReason::Ocpp16KeyInvalid);
+}
+
+// The file entry was dropped at load() because its target was not registered yet; the file layer is replaced only
+// at the next start
+TEST_F(V16KeyBinderFileOverrideTest, FileKeyDroppedAtLoadIsBoundToTheOwner) {
+    m_resolver.replace_file_mappings({});
+    m_binder.on_file_mappings_loaded();
+
+    EXPECT_TRUE(bind_intensity(ocpp::v2::DataEnum::integer).empty());
+    EXPECT_EQ(intensity_target(), "Lamp");
+
+    m_binder.unbind("lamp");
+    EXPECT_FALSE(m_resolver.is_overridden(ocpp::v16::keys::valid_keys::LightIntensity));
+}
+
+// A file entry in effect after load() stays the file's
+TEST_F(V16KeyBinderFileOverrideTest, FileKeyInEffectAfterLoadIsLeftToTheFile) {
+    m_resolver.replace_file_mappings(override_mappings());
+    m_binder.on_file_mappings_loaded();
+
+    EXPECT_TRUE(bind_intensity(ocpp::v2::DataEnum::integer).empty());
+    m_binder.unbind("lamp");
+    EXPECT_EQ(intensity_target(), "Lamp");
+}
+
 } // namespace

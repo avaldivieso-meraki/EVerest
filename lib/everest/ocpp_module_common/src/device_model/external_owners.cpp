@@ -11,6 +11,7 @@
 #include <everest/ocpp_module_common/conversions.hpp>
 #include <everest/ocpp_module_common/device_model/config_service_binding.hpp>
 #include <everest/ocpp_module_common/device_model/definitions.hpp>
+#include <ocpp/common/cistring.hpp>
 #include <ocpp/v2/comparators.hpp>
 
 namespace ocpp_module_common::device_model {
@@ -104,6 +105,14 @@ dm_types::RejectedVariable make_unconvertible(const types::ocpp::Component& comp
     return rejected;
 }
 
+/// \brief Throws when \p key is not a valid OCPP 1.6 configuration key: empty or longer than 50 characters
+void check_ocpp16_key(const std::string& key) {
+    if (key.empty()) {
+        throw std::out_of_range("ocpp16_key must not be empty");
+    }
+    static_cast<void>(ocpp::CiString<50>(key));
+}
+
 /// \brief Converts the components of a registration, leaving out the variables that do not fit the OCPP types and
 /// adding them to \p unconvertible. Only a module that provides ocpp_device_model itself can send these, while EVerest
 /// does not validate the schema.
@@ -125,6 +134,9 @@ to_registered_components(const std::string& owner, const std::vector<dm_types::R
         }
         for (const auto& variable : component.variables) {
             try {
+                if (variable.ocpp16_key.has_value()) {
+                    check_ocpp16_key(variable.ocpp16_key.value());
+                }
                 registered.variables.push_back(to_registered_variable(variable));
             } catch (const std::exception& e) {
                 EVLOG_error << "Owner " << owner << ": variable " << variable.variable.name << " of component "
@@ -439,6 +451,8 @@ void ExternalOwners::on_registration(const std::size_t index, const dm_types::Re
             // ends the registry call
             this->state.handle()->owners.at(applied.owner).releasing = true;
             this->unregister(*registry, applied.owner);
+            this->state.handle()->outbox.emplace_back(
+                index, make_result(applied.owner, dm_types::RegistrationStatus::Rejected));
         }
     }
 
@@ -594,6 +608,8 @@ std::vector<OwnerRegistrationResult> ExternalOwners::register_with(ocpp::v2::Dev
             } catch (const std::exception& e) {
                 EVLOG_error << "Registering owner " << owner << " failed, the owner is dropped: " << e.what();
                 failed.push_back(owner);
+                handle->outbox.emplace_back(entry.connection,
+                                            make_result(owner, dm_types::RegistrationStatus::Rejected));
             }
         }
         for (const auto& owner : failed) {

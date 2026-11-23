@@ -218,6 +218,7 @@ config_factory_result_t create_device_model_charge_point_configuration(
     ocpp_module_common::device_model::check_device_model_conflicts(registrations.results(),
                                                                    fail_on_device_model_conflicts);
     configuration->load();
+    key_binder->on_file_mappings_loaded();
     configuration->check_integrity(n_evse);
 
     return {std::move(configuration), std::move(key_binder), std::move(registrations)};

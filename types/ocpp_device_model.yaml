@@ -280,11 +280,15 @@ types:
         Sent by the API module that received it, and by the OCPP service, when EVerest does not validate the schema,
         for a registration with a variable that does not fit the OCPP types, which it lists with InvalidNameKey.
         Nothing of the registration was passed on, and an earlier registration of the owner stays in place.
+      Rejected: The device model failed to apply the registration, because its storage failed for example. The owner
+        is dropped: neither this registration nor an earlier one of the owner stays in the device model, and the owner
+        name is free. The owner may register again.
     type: string
     enum:
       - Accepted
       - OwnerInUse
       - Invalid
+      - Rejected
   RegistrationRejectionReason:
     description: >-
       Why a variable of a registration was rejected

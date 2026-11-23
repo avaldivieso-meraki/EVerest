@@ -575,7 +575,9 @@ TEST_F(ExternalOwnersTest, FailedRegistrationFreesTheOwnerName) {
     this->owners->set_startup_registrations(1, {});
     registry.fail_next_registration = true;
     EXPECT_TRUE(this->owners->register_with(registry).empty());
-    EXPECT_TRUE(this->first->results.empty());
+    ASSERT_EQ(this->first->results.size(), 1u);
+    EXPECT_EQ(this->first->results.at(0).owner, "meter");
+    EXPECT_EQ(this->first->results.at(0).status, dm_types::RegistrationStatus::Rejected);
 
     this->owners->on_registration(1, make_registration("meter", "AuxMeter", "Energy", "7"));
     ASSERT_EQ(this->second->results.size(), 1u);
@@ -585,10 +587,11 @@ TEST_F(ExternalOwnersTest, FailedRegistrationFreesTheOwnerName) {
     // At runtime as well
     registry.fail_next_registration = true;
     this->owners->on_registration(1, make_registration("meter", "AuxMeter", "Energy", "8"));
-    EXPECT_EQ(this->second->results.size(), 1u);
+    ASSERT_EQ(this->second->results.size(), 2u);
+    EXPECT_EQ(this->second->results.at(1).status, dm_types::RegistrationStatus::Rejected);
     this->owners->on_registration(0, make_registration("meter", "AuxMeter", "Energy", "9"));
-    ASSERT_EQ(this->first->results.size(), 1u);
-    EXPECT_EQ(this->first->results.at(0).status, dm_types::RegistrationStatus::Accepted);
+    ASSERT_EQ(this->first->results.size(), 2u);
+    EXPECT_EQ(this->first->results.at(1).status, dm_types::RegistrationStatus::Accepted);
     this->owners->detach();
 }
 
@@ -705,7 +708,10 @@ TEST_F(ExternalOwnersTest, FailedRegistrationAtRuntimeRemovesTheEarlierOne) {
 
     registry.fail_next_registration = true;
     this->owners->on_registration(0, make_registration("meter", "AuxMeter", "Power", "1"));
-    EXPECT_EQ(this->first->results.size(), 1u);
+    ASSERT_EQ(this->first->results.size(), 2u);
+    EXPECT_EQ(this->first->results.at(1).owner, "meter");
+    EXPECT_EQ(this->first->results.at(1).status, dm_types::RegistrationStatus::Rejected);
+    EXPECT_TRUE(this->first->results.at(1).rejected.empty());
     EXPECT_EQ(this->read("AuxMeter", "Energy"), std::nullopt);
     EXPECT_EQ(this->read("AuxMeter", "Power"), std::nullopt);
     EXPECT_EQ(this->write("AuxMeter", "Energy", "6"), SetVariableStatusEnum::UnknownComponent);
@@ -1093,5 +1099,26 @@ TEST_F(ExternalOwnersTest, RegistrationWhoseKeysAreAllRefusedRegistersNothing) {
     EXPECT_EQ(result.status, dm_types::RegistrationStatus::Accepted);
     ASSERT_EQ(result.rejected.size(), 1u);
     EXPECT_EQ(result.rejected.at(0).reason, dm_types::RegistrationRejectionReason::Ocpp16KeyInUse);
+    EXPECT_EQ(binder.bound.count("cooling"), 0u);
+}
+
+TEST_F(ExternalOwnersTest, RegistrationWithKeysThatDoNotFitOcppIsInvalid) {
+    this->owners->set_startup_registrations(
+        0,
+        make_registrations({make_keyed_registration(
+            "cooling", "CoolingUnit", {{"FanSpeed", ""}, {"Mode", std::string(51, 'K')}, {"Speed", "CoolingSpeed"}})}));
+    this->owners->set_startup_registrations(1, {});
+    this->owners->register_with(*this->device_model, &binder);
+
+    EXPECT_FALSE(this->read("CoolingUnit", "Speed").has_value());
+    ASSERT_EQ(this->first->results.size(), 1u);
+    const auto& result = this->first->results.at(0);
+    EXPECT_EQ(result.status, dm_types::RegistrationStatus::Invalid);
+    ASSERT_EQ(result.rejected.size(), 2u);
+    EXPECT_EQ(result.rejected.at(0).variable.name, "FanSpeed");
+    EXPECT_EQ(result.rejected.at(1).variable.name, "Mode");
+    for (const auto& variable : result.rejected) {
+        EXPECT_EQ(variable.reason, dm_types::RegistrationRejectionReason::InvalidNameKey);
+    }
     EXPECT_EQ(binder.bound.count("cooling"), 0u);
 }

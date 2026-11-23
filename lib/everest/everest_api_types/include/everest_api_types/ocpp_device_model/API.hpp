@@ -44,6 +44,7 @@ enum class RegistrationStatus {
     Accepted,
     OwnerInUse,
     Invalid,
+    Rejected,
 };
 
 enum class RegistrationRejectionReason {
