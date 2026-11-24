@@ -5,13 +5,15 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 
-from runs import build_outcome, cross_targets, native_targets, pick_run
+from runs import CROSS_FAILED_STEP, build_outcome, cross_targets, native_targets, pick_dispatched, pick_run
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTDATA = os.path.join(HERE, "testdata")
 RUNS_PY = os.path.join(os.path.dirname(HERE), "runs.py")
+CROSS_BUILD_WORKFLOW = os.path.join(HERE, "..", "..", "..", ".github", "workflows", "job_bazel-cross-build.yaml")
 SHA = "0bc286811e1279adc4711b6c5e6d9d141660277f"
 RERUN_SHA = "bddf6860ff5e2aa1817fb546c00f59948ae66add"
 TOOLCHAIN = "gcc 13.2.0"
@@ -119,6 +121,62 @@ class PickRunTest(unittest.TestCase):
         self.assertEqual(pick_run(runs, SHA, "push")["id"], 2)
 
 
+def dispatched(run_id, sha, created_at, event="workflow_dispatch"):
+    return {"id": run_id, "head_sha": sha, "event": event, "status": "completed", "created_at": created_at}
+
+
+class PickDispatchedTest(unittest.TestCase):
+    AFTER = "2026-10-29T03:20:00Z"
+
+    def test_oldest_run_at_or_after_the_dispatch(self):
+        runs = {
+            "workflow_runs": [
+                dispatched(3, SHA, "2026-10-29T03:40:00Z"),
+                dispatched(2, SHA, "2026-10-29T03:20:00Z"),
+                dispatched(1, SHA, "2026-10-29T03:19:59Z"),
+            ]
+        }
+        self.assertEqual(pick_dispatched(runs, SHA, self.AFTER)["id"], 2)
+
+    def test_run_at_another_sha_refused(self):
+        other = "f" * 40
+        runs = {"workflow_runs": [dispatched(1, other, "2026-10-29T03:21:00Z")]}
+        with self.assertRaisesRegex(ValueError, f"{other}.*{SHA}"):
+            pick_dispatched(runs, SHA, self.AFTER)
+
+    def test_oldest_run_decides_whatever_its_sha(self):
+        runs = {
+            "workflow_runs": [
+                dispatched(2, SHA, "2026-10-29T03:22:00Z"),
+                dispatched(1, "f" * 40, "2026-10-29T03:21:00Z"),
+            ]
+        }
+        with self.assertRaises(ValueError):
+            pick_dispatched(runs, SHA, self.AFTER)
+
+    def test_other_sha_before_after_is_ignored(self):
+        runs = {
+            "workflow_runs": [
+                dispatched(2, SHA, "2026-10-29T03:22:00Z"),
+                dispatched(1, "f" * 40, "2026-10-29T03:19:00Z"),
+            ]
+        }
+        self.assertEqual(pick_dispatched(runs, SHA, self.AFTER)["id"], 2)
+
+    def test_run_created_before_after_refused(self):
+        runs = {"workflow_runs": [dispatched(1, SHA, "2026-10-29T03:19:59Z")]}
+        self.assertIsNone(pick_dispatched(runs, SHA, self.AFTER))
+
+    def test_other_events_refused(self):
+        runs = {"workflow_runs": [dispatched(1, SHA, "2026-10-29T03:21:00Z", event="schedule")]}
+        self.assertIsNone(pick_dispatched(runs, SHA, self.AFTER))
+
+    def test_after_with_offset(self):
+        runs = {"workflow_runs": [dispatched(1, SHA, "2026-10-29T03:21:00Z")]}
+        self.assertEqual(pick_dispatched(runs, SHA, "2026-10-29T05:20:00+02:00")["id"], 1)
+        self.assertIsNone(pick_dispatched(runs, SHA, "2026-10-29T05:22:00+02:00"))
+
+
 class BuildOutcomeTest(unittest.TestCase):
     def test_compile_succeeded(self):
         self.assertEqual(build_outcome(load("jobs-main-push.json")), "passed")
@@ -174,6 +232,9 @@ class NativeTargetsTest(unittest.TestCase):
             [{"target": "x86_64-linux-gnu", "status": "passed", "toolchain": TOOLCHAIN}],
         )
 
+    def test_without_toolchain(self):
+        self.assertEqual(native_targets(load("jobs-main-push.json"), None), [{"target": "x86_64-linux-gnu", "status": "passed"}])
+
     def test_missing_cmake_job(self):
         self.assertEqual(native_targets(without_jobs(load("jobs-main-push.json"), "CMake GCC /"), TOOLCHAIN), [])
 
@@ -218,6 +279,21 @@ class CrossTargetsTest(unittest.TestCase):
             job = {"name": f"Bazel Cross ({platform}) / build", "conclusion": "success", "steps": []}
             with self.subTest(platform=platform), self.assertRaises(ValueError):
                 cross_targets(cross_jobs(job), {platform: TOOLCHAIN})
+
+    def test_successful_job_with_build_failed_step_is_failed(self):
+        steps = [{"name": "Build all", "conclusion": "failure"}, {"name": CROSS_FAILED_STEP, "conclusion": "success"}]
+        jobs_json = cross_jobs({"name": "Bazel Cross (aarch64-linux-gnu) / build", "conclusion": "success", "steps": steps})
+        self.assertEqual([t["status"] for t in cross_targets(jobs_json, CROSS_TOOLCHAINS)], ["failed"])
+
+    def test_skipped_build_failed_step_keeps_passed(self):
+        steps = [{"name": "Build all", "conclusion": "success"}, {"name": CROSS_FAILED_STEP, "conclusion": "skipped"}]
+        jobs_json = cross_jobs({"name": "Bazel Cross (aarch64-linux-gnu) / build", "conclusion": "success", "steps": steps})
+        self.assertEqual([t["status"] for t in cross_targets(jobs_json, CROSS_TOOLCHAINS)], ["passed"])
+
+    def test_cross_build_workflow_has_the_failed_step(self):
+        with open(CROSS_BUILD_WORKFLOW, encoding="utf-8") as f:
+            step_names = [line.strip().removeprefix("- name:").strip() for line in f if line.strip().startswith("- name:")]
+        self.assertIn(CROSS_FAILED_STEP, step_names)
 
     def test_no_cross_jobs(self):
         self.assertEqual(cross_targets(load("jobs-main-push.json"), {}), [])
@@ -296,10 +372,40 @@ class CliTest(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stdout), (2, ""))
                 self.assertIn("--cross-toolchain", result.stderr)
 
-    def test_targets_needs_toolchain(self):
+    def test_targets_without_toolchain(self):
         result = self.run_cli("targets", stdin_name="jobs-main-push.json")
-        self.assertEqual((result.returncode, result.stdout), (2, ""))
-        self.assertIn("--toolchain", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [{"target": "x86_64-linux-gnu", "status": "passed"}])
+
+    def write_runs(self, runs):
+        path = os.path.join(self.enterContext(tempfile.TemporaryDirectory()), "runs.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(runs, f)
+        return path
+
+    def test_pick_dispatched_prints_id(self):
+        runs = {"workflow_runs": [dispatched(7, SHA, "2026-10-29T03:21:00Z")]}
+        result = self.run_cli(
+            "pick-dispatched", "--sha", SHA, "--after", "2026-10-29T03:20:00Z", stdin_name=self.write_runs(runs)
+        )
+        self.assertEqual((result.returncode, result.stdout), (0, "7\n"))
+
+    def test_pick_dispatched_exits_3_when_none(self):
+        runs = {"workflow_runs": [dispatched(7, SHA, "2026-10-29T03:19:00Z")]}
+        result = self.run_cli(
+            "pick-dispatched", "--sha", SHA, "--after", "2026-10-29T03:20:00Z", stdin_name=self.write_runs(runs)
+        )
+        self.assertEqual((result.returncode, result.stdout), (3, ""))
+
+    def test_pick_dispatched_exits_4_at_another_sha(self):
+        other = "f" * 40
+        runs = {"workflow_runs": [dispatched(7, other, "2026-10-29T03:21:00Z")]}
+        result = self.run_cli(
+            "pick-dispatched", "--sha", SHA, "--after", "2026-10-29T03:20:00Z", stdin_name=self.write_runs(runs)
+        )
+        self.assertEqual((result.returncode, result.stdout), (4, ""))
+        self.assertIn(other, result.stderr)
+        self.assertIn(SHA, result.stderr)
 
     def test_unknown_command_is_a_usage_error(self):
         result = self.run_cli("frobnicate", stdin_name="jobs-main-push.json")

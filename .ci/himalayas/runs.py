@@ -5,6 +5,7 @@
 """Pick workflow runs, build outcomes and build targets from `gh api` JSON."""
 
 import argparse
+import datetime
 import json
 import re
 import sys
@@ -13,11 +14,32 @@ NATIVE_TARGET = "x86_64-linux-gnu"
 CROSS_JOB = re.compile(r"Bazel Cross \(([^)]+)\) / ")
 PLATFORM_PATTERN = re.compile(r"[a-z0-9_]+-[a-z0-9]+-[a-z0-9]+")
 CROSS_STATUSES = {"success": "passed", "skipped": "skipped"}
+CROSS_FAILED_STEP = "Build failed"
 
 
 def pick_run(runs_json: dict, sha: str, event: str) -> dict | None:
     runs = [run for run in runs_json["workflow_runs"] if run["head_sha"] == sha and run["event"] == event]
     return max(runs, key=lambda run: (run.get("run_started_at") or "", run["created_at"]), default=None)
+
+
+def pick_dispatched(runs_json: dict, sha: str, after: str) -> dict | None:
+    after_time = datetime.datetime.fromisoformat(after)
+    runs = [
+        run
+        for run in runs_json["workflow_runs"]
+        if run["event"] == "workflow_dispatch" and datetime.datetime.fromisoformat(run["created_at"]) >= after_time
+    ]
+    run = min(runs, key=lambda run: datetime.datetime.fromisoformat(run["created_at"]), default=None)
+    if run is not None and run["head_sha"] != sha:
+        raise ValueError(f"the run dispatched since {after} is at {run['head_sha']}, not at {sha}")
+    return run
+
+
+def _build_target(triple: str, status: str, toolchain: str | None) -> dict:
+    target = {"target": triple, "status": status}
+    if toolchain is not None:
+        target["toolchain"] = toolchain
+    return target
 
 
 def _jobs(jobs_json: dict) -> list[dict]:
@@ -41,11 +63,11 @@ def build_outcome(jobs_json: dict) -> str:
     return "failed" if job is None else _step_status(job, "Compile")
 
 
-def native_targets(jobs_json: dict, toolchain: str) -> list[dict]:
+def native_targets(jobs_json: dict, toolchain: str | None) -> list[dict]:
     job = _job(jobs_json, "CMake GCC /")
     if job is None:
         return []
-    return [{"target": NATIVE_TARGET, "status": _step_status(job, "Compile"), "toolchain": toolchain}]
+    return [_build_target(NATIVE_TARGET, _step_status(job, "Compile"), toolchain)]
 
 
 def cross_targets(jobs_json: dict, toolchains: dict[str, str]) -> list[dict]:
@@ -60,7 +82,9 @@ def cross_targets(jobs_json: dict, toolchains: dict[str, str]) -> list[dict]:
         if platform not in toolchains:
             raise ValueError(f"no toolchain given for cross platform {platform!r}")
         status = CROSS_STATUSES.get(job["conclusion"], "failed")
-        targets.append({"target": platform, "status": status, "toolchain": toolchains[platform]})
+        if any(step["name"] == CROSS_FAILED_STEP and step["conclusion"] == "success" for step in job.get("steps", [])):
+            status = "failed"
+        targets.append(_build_target(platform, status, toolchains[platform]))
     return targets
 
 
@@ -77,11 +101,15 @@ def main() -> int:
     pick = commands.add_parser("pick-run", help="print the id of the newest run of a SHA and event")
     pick.add_argument("--sha", required=True)
     pick.add_argument("--event", required=True)
+    dispatched = commands.add_parser(
+        "pick-dispatched",
+        help="print the id of the oldest workflow_dispatch run created at or after a time, exit 4 when at another SHA",
+    )
+    dispatched.add_argument("--sha", required=True)
+    dispatched.add_argument("--after", required=True, help="ISO-8601 time the run was dispatched at")
     commands.add_parser("build-outcome", help="print passed or failed")
     targets = commands.add_parser("targets", help="print the build targets as a JSON list")
-    targets.add_argument(
-        "--toolchain", required=True, help='compiler and version of the native build, such as "gcc 13.2.0"'
-    )
+    targets.add_argument("--toolchain", help='compiler and version of the native target, such as "gcc 13.2.0"')
     targets.add_argument("--cross-jobs", metavar="FILE", help="jobs JSON of the run holding the cross builds")
     targets.add_argument(
         "--cross-toolchain",
@@ -98,6 +126,16 @@ def main() -> int:
         run = pick_run(data, args.sha, args.event)
         if run is None:
             print(f"no {args.event} run for {args.sha}", file=sys.stderr)
+            return 3
+        print(run["id"])
+    elif args.command == "pick-dispatched":
+        try:
+            run = pick_dispatched(data, args.sha, args.after)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 4
+        if run is None:
+            print(f"no workflow_dispatch run for {args.sha} since {args.after}", file=sys.stderr)
             return 3
         print(run["id"])
     elif args.command == "build-outcome":
